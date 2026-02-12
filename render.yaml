@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: turbobar-web
+    env: node
+    plan: starter
+    buildCommand: npm ci && npm run build:web
+    startCommand: npm run start:web
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 24.10.0
+      - key: PORT
+        value: 10000
+      - key: TASKS_DB_ID
+        value: 2fa414cc-8377-81f5-bd6a-fca8633835cc
+      - key: NOTES_DB_ID
+        value: be1414cc-8377-82e2-a106-815f50487374
+      - key: GEMINI_MODEL
+        value: gemini-3-flash-preview
+      - key: NOTION_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
