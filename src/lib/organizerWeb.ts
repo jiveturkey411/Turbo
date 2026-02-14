@@ -51,6 +51,7 @@ export async function organizeCaptureWeb(settings: TurboSettings, input: Organiz
     taskPriority: json.taskPriority,
     duePreset: json.duePreset,
     noteStatus: json.noteStatus,
+    assignments: json.assignments,
     summary: json.summary,
   }
 }

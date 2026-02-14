@@ -9,6 +9,41 @@ const DEFAULT_NOTES_DB_ID = 'be1414cc-8377-82e2-a106-815f50487374'
 const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview'
 const NOTION_VERSION = '2022-06-28'
 const PORT = Number(process.env.PORT ?? 8787)
+const MAX_TITLE_CHARS = 60
+const MAX_NEXT_ACTION_CHARS = 120
+const ASSIGNMENT_INTENT_OPTIONS = new Set(['action', 'reference', 'idea', 'planning', 'follow-up'])
+const ASSIGNMENT_EFFORT_OPTIONS = new Set(['quick', 'medium', 'deep'])
+const ASSIGNMENT_ENERGY_OPTIONS = new Set(['low', 'medium', 'high'])
+const ASSIGNMENT_HORIZON_OPTIONS = new Set(['today', 'this-week', 'this-month', 'this-quarter', 'someday'])
+const ASSIGNMENT_PROJECT_STATUS_OPTIONS = new Set(['planned', 'active', 'blocked', 'on-hold', 'complete'])
+const ASSIGNMENT_FIELDS = ['project', 'goal', 'area', 'subArea', 'intent', 'effort', 'energy', 'horizon', 'projectStatus', 'nextAction']
+const DEFAULT_ASSIGNMENT_PROPERTY_TARGETS = {
+  project: 'Project',
+  goal: 'Goal',
+  area: 'Area',
+  subArea: 'Sub-Area',
+  intent: 'Intent',
+  effort: 'Effort',
+  energy: 'Energy',
+  horizon: 'Horizon',
+  projectStatus: 'Project Status',
+  nextAction: 'Next Action',
+}
+const SUPPORTED_ASSIGNMENT_PROPERTY_TYPES = new Set(['select', 'multi_select', 'rich_text'])
+const DB_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000
+const DEFAULT_ASSIGNMENTS = {
+  project: 'General',
+  goal: 'General',
+  area: 'General',
+  subArea: 'General',
+  intent: 'action',
+  effort: 'medium',
+  energy: 'medium',
+  horizon: 'this-week',
+  projectStatus: 'planned',
+  nextAction: 'Review during triage',
+}
+const databasePropertyTypeCache = new Map()
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -120,6 +155,117 @@ function normalizePriority(priorityName) {
   return 'P2 🟠'
 }
 
+function normalizeAssignmentLabel(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const cleaned = compactWhitespace(value)
+  if (!cleaned) {
+    return fallback
+  }
+  if (cleaned.length <= 60) {
+    return cleaned
+  }
+  return cleaned.slice(0, 60).trim()
+}
+
+function normalizeAssignmentIntent(value, fallback) {
+  if (typeof value === 'string' && ASSIGNMENT_INTENT_OPTIONS.has(value)) {
+    return value
+  }
+  return fallback
+}
+
+function normalizeAssignmentEffort(value, fallback) {
+  if (typeof value === 'string' && ASSIGNMENT_EFFORT_OPTIONS.has(value)) {
+    return value
+  }
+  return fallback
+}
+
+function normalizeAssignmentEnergy(value, fallback) {
+  if (typeof value === 'string' && ASSIGNMENT_ENERGY_OPTIONS.has(value)) {
+    return value
+  }
+  return fallback
+}
+
+function normalizeAssignmentHorizon(value, fallback) {
+  if (typeof value === 'string' && ASSIGNMENT_HORIZON_OPTIONS.has(value)) {
+    return value
+  }
+  return fallback
+}
+
+function normalizeAssignmentProjectStatus(value, fallback) {
+  if (typeof value === 'string' && ASSIGNMENT_PROJECT_STATUS_OPTIONS.has(value)) {
+    return value
+  }
+  return fallback
+}
+
+function normalizeAssignmentNextAction(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const cleaned = compactWhitespace(value)
+  if (!cleaned) {
+    return fallback
+  }
+  if (cleaned.length <= MAX_NEXT_ACTION_CHARS) {
+    return cleaned
+  }
+  return cleaned.slice(0, MAX_NEXT_ACTION_CHARS).trim()
+}
+
+function normalizePropertyName(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : fallback
+}
+
+function normalizeAssignmentPropertyTargets(value, fallback) {
+  const source = value && typeof value === 'object' ? value : {}
+
+  return {
+    project: normalizePropertyName(source.project, fallback.project),
+    goal: normalizePropertyName(source.goal, fallback.goal),
+    area: normalizePropertyName(source.area, fallback.area),
+    subArea: normalizePropertyName(source.subArea, fallback.subArea),
+    intent: normalizePropertyName(source.intent, fallback.intent),
+    effort: normalizePropertyName(source.effort, fallback.effort),
+    energy: normalizePropertyName(source.energy, fallback.energy),
+    horizon: normalizePropertyName(source.horizon, fallback.horizon),
+    projectStatus: normalizePropertyName(source.projectStatus, fallback.projectStatus),
+    nextAction: normalizePropertyName(source.nextAction, fallback.nextAction),
+  }
+}
+
+function normalizeAssignments(value, mode, fallback) {
+  const source = value && typeof value === 'object' ? value : {}
+  const intentFallback = mode === 'task' ? 'action' : 'reference'
+  const projectStatusFallback = mode === 'task' ? 'active' : 'planned'
+  const nextActionFallback = mode === 'task' ? 'Define first action step' : 'Review during triage'
+
+  return {
+    project: normalizeAssignmentLabel(source.project, fallback.project),
+    goal: normalizeAssignmentLabel(source.goal, fallback.goal),
+    area: normalizeAssignmentLabel(source.area, fallback.area),
+    subArea: normalizeAssignmentLabel(source.subArea, fallback.subArea),
+    intent: normalizeAssignmentIntent(source.intent, intentFallback),
+    effort: normalizeAssignmentEffort(source.effort, fallback.effort),
+    energy: normalizeAssignmentEnergy(source.energy, fallback.energy),
+    horizon: normalizeAssignmentHorizon(source.horizon, fallback.horizon),
+    projectStatus: normalizeAssignmentProjectStatus(source.projectStatus, projectStatusFallback),
+    nextAction: normalizeAssignmentNextAction(source.nextAction, nextActionFallback),
+  }
+}
+
 function normalizeDuePreset(value, fallback) {
   if (value === 'none' || value === 'today' || value === 'tomorrow') {
     return value
@@ -139,6 +285,160 @@ function normalizeNoteStatus(value, mode) {
     return value
   }
   return mode === 'inbox' ? 'Inbox' : 'Brain Dump'
+}
+
+function compactWhitespace(value) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function shortTitle(value) {
+  const cleaned = compactWhitespace(value).replace(/[.!?:;,]+$/g, '').trim()
+  if (!cleaned) {
+    return ''
+  }
+
+  if (cleaned.length <= MAX_TITLE_CHARS) {
+    return cleaned
+  }
+
+  const truncated = cleaned.slice(0, MAX_TITLE_CHARS)
+  const cutAt = truncated.lastIndexOf(' ')
+  if (cutAt >= 20) {
+    return truncated.slice(0, cutAt).trim()
+  }
+  return truncated.trim()
+}
+
+function fallbackTitleFromInput(title, body) {
+  const fromTitle = shortTitle(title)
+  if (fromTitle) {
+    return fromTitle
+  }
+
+  const fromBody = body
+    .split(/\r?\n/)
+    .map((line) => shortTitle(line))
+    .find((line) => line.length > 0)
+  if (fromBody) {
+    return fromBody
+  }
+
+  return 'Untitled capture'
+}
+
+function normalizeTitle(value, fallback) {
+  if (typeof value === 'string') {
+    const cleaned = shortTitle(value)
+    if (cleaned.length > 0) {
+      return cleaned
+    }
+  }
+
+  const fallbackTitle = shortTitle(fallback)
+  return fallbackTitle.length > 0 ? fallbackTitle : 'Untitled capture'
+}
+
+function hasChecklistItems(value) {
+  return /(?:^|\n)\s*-\s*\[[xX ]\]\s+\S+/.test(value)
+}
+
+function fallbackSubtaskBlock() {
+  return ['Suggested subtasks:', '- [ ] Clarify scope and constraints', '- [ ] Execute the core work', '- [ ] Review and finalize'].join('\n')
+}
+
+function ensureTaskBodySubtasks(mode, body) {
+  const trimmedBody = typeof body === 'string' ? body.trim() : ''
+  if (mode !== 'task') {
+    return trimmedBody
+  }
+
+  if (hasChecklistItems(trimmedBody)) {
+    return trimmedBody
+  }
+
+  const subtaskBlock = fallbackSubtaskBlock()
+  if (!trimmedBody) {
+    return subtaskBlock
+  }
+  return `${trimmedBody}\n\n${subtaskBlock}`
+}
+
+async function getDatabasePropertyTypes(notion, databaseId) {
+  const now = Date.now()
+  const cached = databasePropertyTypeCache.get(databaseId)
+  if (cached && cached.expiresAt > now) {
+    return cached.propertyTypes
+  }
+
+  const database = await notion.databases.retrieve({ database_id: databaseId })
+  const source = database?.properties && typeof database.properties === 'object' ? database.properties : {}
+  const propertyTypes = {}
+
+  for (const [propertyName, propertyDefinition] of Object.entries(source)) {
+    if (propertyDefinition && typeof propertyDefinition === 'object' && typeof propertyDefinition.type === 'string') {
+      propertyTypes[propertyName] = propertyDefinition.type
+    }
+  }
+
+  databasePropertyTypeCache.set(databaseId, {
+    expiresAt: now + DB_SCHEMA_CACHE_TTL_MS,
+    propertyTypes,
+  })
+
+  return propertyTypes
+}
+
+function setMappedAssignmentProperty(properties, propertyName, propertyType, value) {
+  if (!SUPPORTED_ASSIGNMENT_PROPERTY_TYPES.has(propertyType)) {
+    return
+  }
+
+  if (propertyType === 'select') {
+    properties[propertyName] = { select: { name: value } }
+    return
+  }
+
+  if (propertyType === 'multi_select') {
+    properties[propertyName] = { multi_select: [{ name: value }] }
+    return
+  }
+
+  properties[propertyName] = {
+    rich_text: [
+      {
+        type: 'text',
+        text: { content: value },
+      },
+    ],
+  }
+}
+
+async function applyAssignmentProperties(notion, databaseId, properties, assignments, propertyTargets) {
+  const propertyTypes = await getDatabasePropertyTypes(notion, databaseId)
+
+  for (const field of ASSIGNMENT_FIELDS) {
+    const propertyName = normalizePropertyName(propertyTargets[field], '')
+    if (!propertyName) {
+      continue
+    }
+
+    const propertyType = propertyTypes[propertyName]
+    if (!propertyType) {
+      continue
+    }
+
+    const rawValue = assignments[field]
+    if (typeof rawValue !== 'string') {
+      continue
+    }
+
+    const value = compactWhitespace(rawValue)
+    if (!value) {
+      continue
+    }
+
+    setMappedAssignmentProperty(properties, propertyName, propertyType, value)
+  }
 }
 
 function jsonError(res, status, message, details) {
@@ -190,6 +490,9 @@ app.post('/api/notion/create-task', async (req, res) => {
     const dueISO = typeof input.dueISO === 'string' && input.dueISO.trim().length > 0 ? input.dueISO.trim() : undefined
     const now = typeof input.now === 'boolean' ? input.now : false
     const priorityName = normalizePriority(input.priorityName)
+    const assignments =
+      input.assignments && typeof input.assignments === 'object' ? normalizeAssignments(input.assignments, 'task', DEFAULT_ASSIGNMENTS) : null
+    const assignmentPropertyTargets = normalizeAssignmentPropertyTargets(input.assignmentPropertyTargets, DEFAULT_ASSIGNMENT_PROPERTY_TARGETS)
 
     const properties = {
       Task: {
@@ -208,6 +511,9 @@ app.post('/api/notion/create-task', async (req, res) => {
 
     if (dueISO) {
       properties.Due = { date: { start: dueISO } }
+    }
+    if (assignments) {
+      await applyAssignmentProperties(notion, tasksDbId, properties, assignments, assignmentPropertyTargets)
     }
 
     const children = bodyToParagraphBlocks(body)
@@ -239,6 +545,10 @@ app.post('/api/notion/create-note', async (req, res) => {
     const statusName = input.statusName === 'Inbox' ? 'Inbox' : 'Brain Dump'
     const captureType = input.captureType === 'Quick' ? 'Quick' : 'Quick'
     const tags = normalizeTags(input.tags)
+    const assignmentMode = statusName === 'Inbox' ? 'inbox' : 'brainDump'
+    const assignments =
+      input.assignments && typeof input.assignments === 'object' ? normalizeAssignments(input.assignments, assignmentMode, DEFAULT_ASSIGNMENTS) : null
+    const assignmentPropertyTargets = normalizeAssignmentPropertyTargets(input.assignmentPropertyTargets, DEFAULT_ASSIGNMENT_PROPERTY_TARGETS)
 
     const properties = {
       Note: {
@@ -257,6 +567,9 @@ app.post('/api/notion/create-note', async (req, res) => {
             },
           }
         : {}),
+    }
+    if (assignments) {
+      await applyAssignmentProperties(notion, notesDbId, properties, assignments, assignmentPropertyTargets)
     }
 
     const children = bodyToParagraphBlocks(body)
@@ -291,18 +604,16 @@ app.post('/api/ai/organize', async (req, res) => {
         ? req.body.model.trim()
         : process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL
 
+    const modeFromInput = normalizeMode(input.mode, 'task')
     const draft = {
-      mode: normalizeMode(input.mode, 'task'),
+      mode: modeFromInput,
       title: typeof input.title === 'string' ? input.title.trim() : '',
       body: typeof input.body === 'string' ? input.body : '',
       tags: normalizeTags(input.tags),
       taskNow: typeof input.taskNow === 'boolean' ? input.taskNow : false,
       taskPriority: normalizePriority(input.taskPriority),
       duePreset: normalizeDuePreset(input.duePreset, 'none'),
-    }
-
-    if (!draft.title) {
-      throw new Error('Missing or invalid "title".')
+      assignments: normalizeAssignments(input.assignments, modeFromInput, DEFAULT_ASSIGNMENTS),
     }
 
     const todayISO = new Date().toISOString().slice(0, 10)
@@ -315,9 +626,18 @@ Rules:
   - "task" when this is an actionable item someone should do.
   - "brainDump" when this is a thought/reference/idea for later.
   - "inbox" when it is a note that still needs review/triage.
-- Clean title: concise and specific.
+- Clean title: concise and specific (3-8 words, max 60 chars). If title is weak or missing, create a better short one from body/context.
 - Keep body useful but concise; preserve important details and links.
+- For task mode, include a "Suggested subtasks:" section in body with 2-5 checklist lines formatted as "- [ ] ...".
 - Choose tags only for note modes (brainDump/inbox). For task mode, tags can be empty.
+- Always assign:
+  - project, goal, area, subArea: short labels (1-4 words). Use "General" when unclear.
+  - intent: one of "action", "reference", "idea", "planning", "follow-up".
+  - effort: one of "quick", "medium", "deep".
+  - energy: one of "low", "medium", "high".
+  - horizon: one of "today", "this-week", "this-month", "this-quarter", "someday".
+  - projectStatus: one of "planned", "active", "blocked", "on-hold", "complete".
+  - nextAction: 3-10 words, concrete and specific.
 - taskPriority must be one of: "P1 🔴", "P2 🟠", "P3 🟡".
 - duePreset must be one of: "none", "today", "tomorrow", relative to ${todayISO}.
 - noteStatus must be "Brain Dump" or "Inbox".
@@ -344,7 +664,7 @@ Rules:
             responseMimeType: 'application/json',
             responseSchema: {
               type: 'OBJECT',
-              required: ['mode', 'title', 'body', 'tags', 'taskNow', 'taskPriority', 'duePreset', 'noteStatus', 'summary'],
+              required: ['mode', 'title', 'body', 'tags', 'taskNow', 'taskPriority', 'duePreset', 'noteStatus', 'assignments', 'summary'],
               properties: {
                 mode: { type: 'STRING', enum: ['task', 'brainDump', 'inbox'] },
                 title: { type: 'STRING' },
@@ -354,6 +674,22 @@ Rules:
                 taskPriority: { type: 'STRING', enum: ['P1 🔴', 'P2 🟠', 'P3 🟡'] },
                 duePreset: { type: 'STRING', enum: ['none', 'today', 'tomorrow'] },
                 noteStatus: { type: 'STRING', enum: ['Brain Dump', 'Inbox'] },
+                assignments: {
+                  type: 'OBJECT',
+                  required: ['project', 'goal', 'area', 'subArea', 'intent', 'effort', 'energy', 'horizon', 'projectStatus', 'nextAction'],
+                  properties: {
+                    project: { type: 'STRING' },
+                    goal: { type: 'STRING' },
+                    area: { type: 'STRING' },
+                    subArea: { type: 'STRING' },
+                    intent: { type: 'STRING', enum: ['action', 'reference', 'idea', 'planning', 'follow-up'] },
+                    effort: { type: 'STRING', enum: ['quick', 'medium', 'deep'] },
+                    energy: { type: 'STRING', enum: ['low', 'medium', 'high'] },
+                    horizon: { type: 'STRING', enum: ['today', 'this-week', 'this-month', 'this-quarter', 'someday'] },
+                    projectStatus: { type: 'STRING', enum: ['planned', 'active', 'blocked', 'on-hold', 'complete'] },
+                    nextAction: { type: 'STRING' },
+                  },
+                },
                 summary: { type: 'STRING' },
               },
             },
@@ -371,17 +707,20 @@ Rules:
     const text = extractResponseText(geminiJson)
     const parsed = JSON.parse(text)
     const mode = normalizeMode(parsed.mode, draft.mode)
+    const fallbackTitle = fallbackTitleFromInput(draft.title, draft.body)
+    const rawBody = typeof parsed.body === 'string' ? parsed.body : draft.body
 
     res.json({
       ok: true,
       mode,
-      title: typeof parsed.title === 'string' && parsed.title.trim().length > 0 ? parsed.title.trim() : draft.title,
-      body: typeof parsed.body === 'string' ? parsed.body.trim() : draft.body,
+      title: normalizeTitle(parsed.title, fallbackTitle),
+      body: ensureTaskBodySubtasks(mode, rawBody),
       tags: normalizeTags(parsed.tags),
       taskNow: typeof parsed.taskNow === 'boolean' ? parsed.taskNow : draft.taskNow,
       taskPriority: normalizePriority(parsed.taskPriority),
       duePreset: normalizeDuePreset(parsed.duePreset, draft.duePreset),
       noteStatus: normalizeNoteStatus(parsed.noteStatus, mode),
+      assignments: normalizeAssignments(parsed.assignments, mode, draft.assignments),
       summary: typeof parsed.summary === 'string' && parsed.summary.trim().length > 0 ? parsed.summary.trim() : 'Capture organized by AI.',
     })
   } catch (error) {

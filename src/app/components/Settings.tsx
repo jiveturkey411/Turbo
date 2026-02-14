@@ -1,4 +1,17 @@
-import type { TurboSettings } from '../../lib/types'
+import type { AssignmentPropertyTargets, DatabaseKind, ExtraDatabase, TurboSettings } from '../../lib/types'
+
+const ASSIGNMENT_PROPERTY_FIELDS: Array<{ key: keyof AssignmentPropertyTargets; label: string }> = [
+  { key: 'project', label: 'Project' },
+  { key: 'goal', label: 'Goal' },
+  { key: 'area', label: 'Area' },
+  { key: 'subArea', label: 'Sub-Area' },
+  { key: 'intent', label: 'Intent' },
+  { key: 'effort', label: 'Effort' },
+  { key: 'energy', label: 'Energy' },
+  { key: 'horizon', label: 'Horizon' },
+  { key: 'projectStatus', label: 'Project Status' },
+  { key: 'nextAction', label: 'Next Action' },
+]
 
 interface SettingsProps {
   open: boolean
@@ -20,6 +33,57 @@ export function Settings({ open, isElectron, settings, saving, onToggle, onSave,
       ...settings,
       defaults: { ...settings.defaults, ...update },
     })
+  }
+
+  const setAi = (update: Partial<TurboSettings['ai']>) => {
+    onChange({
+      ...settings,
+      ai: { ...settings.ai, ...update },
+    })
+  }
+
+  const setAssignmentProperty = (scope: 'task' | 'note', field: keyof AssignmentPropertyTargets, value: string) => {
+    setAi({
+      assignmentPropertyMap: {
+        ...settings.ai.assignmentPropertyMap,
+        [scope]: {
+          ...settings.ai.assignmentPropertyMap[scope],
+          [field]: value,
+        },
+      },
+    })
+  }
+
+  const addExtraDatabase = () => {
+    const next: ExtraDatabase = {
+      name: '',
+      id: '',
+      kind: 'note',
+    }
+    setSetting({
+      extraDatabases: [...settings.extraDatabases, next],
+    })
+  }
+
+  const setExtraDatabase = (index: number, update: Partial<ExtraDatabase>) => {
+    const next = settings.extraDatabases.map((item, itemIndex) => {
+      if (itemIndex !== index) {
+        return item
+      }
+      return { ...item, ...update }
+    })
+    setSetting({ extraDatabases: next })
+  }
+
+  const removeExtraDatabase = (index: number) => {
+    setSetting({
+      extraDatabases: settings.extraDatabases.filter((_item, itemIndex) => itemIndex !== index),
+    })
+  }
+
+  const setExtraDatabaseKind = (index: number, value: string) => {
+    const kind: DatabaseKind = value === 'task' ? 'task' : 'note'
+    setExtraDatabase(index, { kind })
   }
 
   return (
@@ -62,11 +126,8 @@ export function Settings({ open, isElectron, settings, saving, onToggle, onSave,
               type="text"
               value={settings.ai.model}
               onChange={(event) =>
-                setSetting({
-                  ai: {
-                    ...settings.ai,
-                    model: event.target.value,
-                  },
+                setAi({
+                  model: event.target.value,
                 })
               }
             />
@@ -77,16 +138,73 @@ export function Settings({ open, isElectron, settings, saving, onToggle, onSave,
               type="checkbox"
               checked={settings.ai.autoOrganize}
               onChange={(event) =>
-                setSetting({
-                  ai: {
-                    ...settings.ai,
-                    autoOrganize: event.target.checked,
-                  },
+                setAi({
+                  autoOrganize: event.target.checked,
                 })
               }
             />
-            <span>Auto-Organize with Gemini</span>
+            <span>Auto Assign on Save</span>
           </label>
+
+          <details className="settings-subpanel">
+            <summary>AI Assignment Property Mapping</summary>
+            <div className="settings-subgrid">
+              <h4>Task DB Properties</h4>
+              {ASSIGNMENT_PROPERTY_FIELDS.map(({ key, label }) => (
+                <label key={`task-${key}`}>
+                  <span>{label}</span>
+                  <input
+                    type="text"
+                    value={settings.ai.assignmentPropertyMap.task[key]}
+                    onChange={(event) => setAssignmentProperty('task', key, event.target.value)}
+                  />
+                </label>
+              ))}
+              <h4>Note DB Properties</h4>
+              {ASSIGNMENT_PROPERTY_FIELDS.map(({ key, label }) => (
+                <label key={`note-${key}`}>
+                  <span>{label}</span>
+                  <input
+                    type="text"
+                    value={settings.ai.assignmentPropertyMap.note[key]}
+                    onChange={(event) => setAssignmentProperty('note', key, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
+
+          <details className="settings-subpanel">
+            <summary>Additional Databases</summary>
+            <div className="settings-subgrid">
+              {settings.extraDatabases.length === 0 && <p className="settings-note">No extra databases yet.</p>}
+              {settings.extraDatabases.map((database, index) => (
+                <div key={`db-${index}`} className="db-item">
+                  <label>
+                    <span>Name</span>
+                    <input type="text" value={database.name} onChange={(event) => setExtraDatabase(index, { name: event.target.value })} />
+                  </label>
+                  <label>
+                    <span>Type</span>
+                    <select value={database.kind} onChange={(event) => setExtraDatabaseKind(index, event.target.value)}>
+                      <option value="task">Task DB</option>
+                      <option value="note">Note DB</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Database ID</span>
+                    <input type="text" value={database.id} onChange={(event) => setExtraDatabase(index, { id: event.target.value })} />
+                  </label>
+                  <button type="button" className="button-secondary small-button" onClick={() => removeExtraDatabase(index)}>
+                    Remove DB
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="button-secondary" onClick={addExtraDatabase}>
+                Add Database
+              </button>
+            </div>
+          </details>
 
           <label>
             <span>Tasks DB ID</span>

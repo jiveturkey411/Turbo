@@ -4,7 +4,7 @@ Fast capture bar for tasks + brain dumps with:
 - Electron tray app (`Ctrl+Alt+Space`)
 - Web/PWA mode for Notion embed
 - Notion write-through (Tasks + Notes DB)
-- Gemini auto-organize (mode, priority, due, tags, summary)
+- Gemini auto-organize and auto-assign (mode, priority, due, tags, project, goal, area, sub-area, intent, effort, energy, horizon, project status, next action, summary)
 
 ## Local development
 
@@ -72,3 +72,8 @@ The web server sets CSP `frame-ancestors` for Notion domains so iframe embedding
 
 - Electron mode still uses local Settings for tokens.
 - Web mode uses server env vars for secrets.
+- For notes, AI assignments are also written as tags (for example `project/...`, `goal/...`, `area/...`).
+- For tasks, AI assignments are appended to the task body in an `AI Assignments` block.
+- Assignment fields can also map into dedicated Notion properties (Task DB and Note DB) via Settings > `AI Assignment Property Mapping`.
+- Assignment property mapping supports Notion `select`, `multi_select`, and `rich_text` properties.
+- You can add multiple extra Task/Note databases in Settings > `Additional Databases`, then choose the target DB from the capture form before saving.

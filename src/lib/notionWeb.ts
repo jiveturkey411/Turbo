@@ -45,22 +45,26 @@ async function postApi<TPayload>(endpoint: string, payload: TPayload): Promise<N
 }
 
 export async function createTaskWeb(settings: TurboSettings, input: CreateTaskInput): Promise<NotionCreateResult> {
+  const tasksDbId = typeof input.databaseId === 'string' && input.databaseId.trim().length > 0 ? input.databaseId.trim() : settings.tasksDbId
   return postApi('/api/notion/create-task', {
     input: {
       ...input,
       priorityName: input.priorityName ?? settings.defaults.taskPriority,
       now: input.now ?? settings.defaults.taskNow,
+      assignmentPropertyTargets: input.assignmentPropertyTargets ?? settings.ai.assignmentPropertyMap.task,
     },
-    tasksDbId: settings.tasksDbId,
+    tasksDbId,
   })
 }
 
 export async function createNoteWeb(settings: TurboSettings, input: CreateNoteInput): Promise<NotionCreateResult> {
+  const notesDbId = typeof input.databaseId === 'string' && input.databaseId.trim().length > 0 ? input.databaseId.trim() : settings.notesDbId
   return postApi('/api/notion/create-note', {
     input: {
       ...input,
       captureType: input.captureType ?? settings.defaults.noteCaptureType,
+      assignmentPropertyTargets: input.assignmentPropertyTargets ?? settings.ai.assignmentPropertyMap.note,
     },
-    notesDbId: settings.notesDbId,
+    notesDbId,
   })
 }

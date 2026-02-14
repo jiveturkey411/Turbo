@@ -50,28 +50,6 @@ body {
   gap: 10px;
 }
 
-.mode-tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.mode-tab {
-  border: 1px solid #2f415f;
-  background: rgba(33, 45, 67, 0.5);
-  color: #b6c6e4;
-  border-radius: 999px;
-  font-size: 12px;
-  padding: 7px 11px;
-  cursor: pointer;
-}
-
-.mode-tab.active {
-  background: linear-gradient(135deg, #4f7ecf, #3665af);
-  border-color: #5f8bd5;
-  color: #eef4ff;
-}
-
 .settings-shell {
   justify-self: end;
 }
@@ -124,6 +102,40 @@ body {
   padding: 8px;
 }
 
+.settings-subpanel {
+  border: 1px solid #2d3f5a;
+  border-radius: 8px;
+  background: rgba(16, 24, 39, 0.75);
+  padding: 8px;
+}
+
+.settings-subpanel summary {
+  cursor: pointer;
+  color: #c5d7f7;
+  font-size: 12px;
+}
+
+.settings-subgrid {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-subgrid h4 {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #d8e6ff;
+}
+
+.db-item {
+  border: 1px solid #2e4363;
+  border-radius: 8px;
+  background: rgba(12, 21, 35, 0.7);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
 .capture-form {
   margin-top: 10px;
   display: grid;
@@ -142,6 +154,7 @@ body {
 
 .field input,
 .field textarea,
+.field select,
 .priority-select select {
   width: 100%;
   border: 1px solid #314463;
@@ -155,6 +168,7 @@ body {
 
 .field input:focus,
 .field textarea:focus,
+.field select:focus,
 .priority-select select:focus {
   border-color: #5f89ce;
 }
@@ -275,6 +289,11 @@ body {
   padding: 10px 12px;
 }
 
+.small-button {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
 .button-secondary:disabled,
 .button-primary:disabled {
   opacity: 0.6;
@@ -319,6 +338,22 @@ body {
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 12px;
+}
+
+.assignment-chips {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assignment-chip {
+  border: 1px solid #3e5f87;
+  background: rgba(22, 35, 55, 0.82);
+  color: #d2e2ff;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 .last-created {

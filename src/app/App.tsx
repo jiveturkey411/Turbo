@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { CaptureModeTabs } from './components/CaptureModeTabs'
 import { QuickToggles } from './components/QuickToggles'
 import { Settings } from './components/Settings'
 import { createNoteWeb, createTaskWeb } from '../lib/notionWeb'
 import { organizeCaptureWeb } from '../lib/organizerWeb'
 import {
+  DEFAULT_CAPTURE_ASSIGNMENTS,
   DEFAULT_SETTINGS,
   normalizeSettings,
+  type CaptureAssignments,
   type CaptureMode,
   type CreateNoteInput,
   type CreateTaskInput,
   type DuePreset,
+  type ExtraDatabase,
   type NotionCreateResult,
   type OrganizeCaptureInput,
   type OrganizeCaptureResult,
@@ -19,11 +21,6 @@ import {
 } from '../lib/types'
 
 const SETTINGS_KEY = 'turbobar.settings'
-const MODE_KEY = 'turbobar.lastMode'
-
-function isCaptureMode(value: string | null): value is CaptureMode {
-  return value === 'task' || value === 'brainDump' || value === 'inbox'
-}
 
 function getDueIso(preset: DuePreset): string | undefined {
   if (preset === 'none') {
@@ -49,19 +46,73 @@ function normalizeTags(tags: string[]): string[] {
   return [...set]
 }
 
+function slugTag(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return normalized || 'general'
+}
+
+function assignmentTags(assignments: CaptureAssignments): string[] {
+  return [
+    `project/${slugTag(assignments.project)}`,
+    `goal/${slugTag(assignments.goal)}`,
+    `area/${slugTag(assignments.area)}`,
+    `sub-area/${slugTag(assignments.subArea)}`,
+    `intent/${assignments.intent}`,
+    `effort/${assignments.effort}`,
+    `energy/${assignments.energy}`,
+    `horizon/${assignments.horizon}`,
+    `project-status/${assignments.projectStatus}`,
+  ]
+}
+
+function assignmentBlock(assignments: CaptureAssignments): string {
+  return [
+    'AI Assignments:',
+    `- Project: ${assignments.project}`,
+    `- Goal: ${assignments.goal}`,
+    `- Area: ${assignments.area}`,
+    `- Sub-Area: ${assignments.subArea}`,
+    `- Intent: ${assignments.intent}`,
+    `- Effort: ${assignments.effort}`,
+    `- Energy: ${assignments.energy}`,
+    `- Horizon: ${assignments.horizon}`,
+    `- Project Status: ${assignments.projectStatus}`,
+    `- Next Action: ${assignments.nextAction}`,
+  ].join('\n')
+}
+
+function appendAssignmentBlock(body: string, assignments: CaptureAssignments): string {
+  const trimmed = body.trim()
+  const block = assignmentBlock(assignments)
+  if (!trimmed) {
+    return block
+  }
+  return `${trimmed}\n\n${block}`
+}
+
 function noteStatusForMode(mode: CaptureMode): 'Brain Dump' | 'Inbox' {
   return mode === 'inbox' ? 'Inbox' : 'Brain Dump'
+}
+
+function hasDraftContent(draft: OrganizeCaptureInput): boolean {
+  return draft.title.trim().length > 0 || draft.body.trim().length > 0
+}
+
+function usableExtraDatabases(databases: ExtraDatabase[], kind: 'task' | 'note'): ExtraDatabase[] {
+  return databases.filter((database) => database.kind === kind && database.id.trim().length > 0)
 }
 
 export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const isElectron = Boolean(window.turboAPI)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
 
-  const [mode, setMode] = useState<CaptureMode>(() => {
-    const fromStorage = localStorage.getItem(MODE_KEY)
-    return isCaptureMode(fromStorage) ? fromStorage : 'task'
-  })
+  const [mode, setMode] = useState<CaptureMode>('task')
 
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -75,16 +126,22 @@ export default function App() {
   const [taskNow, setTaskNow] = useState(DEFAULT_SETTINGS.defaults.taskNow)
   const [duePreset, setDuePreset] = useState<DuePreset>('none')
   const [priority, setPriority] = useState(DEFAULT_SETTINGS.defaults.taskPriority)
+  const [assignments, setAssignments] = useState<CaptureAssignments>(DEFAULT_CAPTURE_ASSIGNMENTS)
+  const [taskDatabaseId, setTaskDatabaseId] = useState('')
+  const [noteDatabaseId, setNoteDatabaseId] = useState('')
 
   const [isSaving, setIsSaving] = useState(false)
   const [isOrganizing, setIsOrganizing] = useState(false)
   const [toast, setToast] = useState('')
   const [error, setError] = useState('')
   const [aiSummary, setAiSummary] = useState('')
+  const [hasAiAssignments, setHasAiAssignments] = useState(false)
   const [lastCreatedUrl, setLastCreatedUrl] = useState('')
 
   const isTaskMode = mode === 'task'
   const isNoteMode = mode === 'brainDump' || mode === 'inbox'
+  const taskDatabases = useMemo(() => usableExtraDatabases(settings.extraDatabases, 'task'), [settings.extraDatabases])
+  const noteDatabases = useMemo(() => usableExtraDatabases(settings.extraDatabases, 'note'), [settings.extraDatabases])
 
   const addTagTokens = useCallback(
     (raw: string) => {
@@ -100,10 +157,6 @@ export default function App() {
     },
     [setTags],
   )
-
-  useEffect(() => {
-    localStorage.setItem(MODE_KEY, mode)
-  }, [mode])
 
   useEffect(() => {
     const timer = toast
@@ -174,6 +227,18 @@ export default function App() {
     void loadInitialSettings()
   }, [])
 
+  useEffect(() => {
+    if (taskDatabaseId && !taskDatabases.some((database) => database.id === taskDatabaseId)) {
+      setTaskDatabaseId('')
+    }
+  }, [taskDatabaseId, taskDatabases])
+
+  useEffect(() => {
+    if (noteDatabaseId && !noteDatabases.some((database) => database.id === noteDatabaseId)) {
+      setNoteDatabaseId('')
+    }
+  }, [noteDatabaseId, noteDatabases])
+
   const saveSettings = useCallback(async () => {
     const normalized = normalizeSettings(settings)
     setSettingsSaving(true)
@@ -201,12 +266,15 @@ export default function App() {
   }, [settings])
 
   const clearAfterSave = useCallback(() => {
+    setMode('task')
     setTitle('')
     setBody('')
     setTags([])
     setTagInput('')
     setDuePreset('none')
+    setAssignments(DEFAULT_CAPTURE_ASSIGNMENTS)
     setAiSummary('')
+    setHasAiAssignments(false)
   }, [])
 
   const getDraftFromState = useCallback(
@@ -218,8 +286,9 @@ export default function App() {
       taskNow,
       taskPriority: priority,
       duePreset,
+      assignments,
     }),
-    [body, duePreset, mode, priority, tags, taskNow, title],
+    [assignments, body, duePreset, mode, priority, tags, taskNow, title],
   )
 
   const applyOrganizedDraft = useCallback((organized: OrganizeCaptureResult) => {
@@ -230,7 +299,9 @@ export default function App() {
     setTaskNow(organized.taskNow)
     setPriority(organized.taskPriority)
     setDuePreset(organized.duePreset)
+    setAssignments(organized.assignments)
     setAiSummary(organized.summary)
+    setHasAiAssignments(true)
   }, [])
 
   const organizeDraft = useCallback(
@@ -252,50 +323,65 @@ export default function App() {
     [settings],
   )
 
-  const createCapture = useCallback(async (draft: OrganizeCaptureInput | OrganizeCaptureResult): Promise<NotionCreateResult> => {
-    const cleanTitle = draft.title.trim()
-    if (!cleanTitle) {
-      throw new Error('Title is required.')
-    }
-    if (window.turboAPI && !settings.notionToken.trim()) {
-      throw new Error('Add your Notion token in Settings first.')
-    }
+  const createCapture = useCallback(
+    async (draft: OrganizeCaptureInput | OrganizeCaptureResult): Promise<NotionCreateResult> => {
+      const cleanTitle = draft.title.trim()
+      const includeAssignments = hasAiAssignments || 'noteStatus' in draft
+      if (!cleanTitle) {
+        throw new Error('Title is required.')
+      }
+      if (window.turboAPI && !settings.notionToken.trim()) {
+        throw new Error('Add your Notion token in Settings first.')
+      }
 
-    if (draft.mode === 'task') {
-      const taskPayload: CreateTaskInput = {
+      if (draft.mode === 'task') {
+        const taskBody = includeAssignments ? appendAssignmentBlock(draft.body, draft.assignments) : draft.body.trim()
+        const taskPayload: CreateTaskInput = {
+          title: cleanTitle,
+          body: taskBody || undefined,
+          dueISO: getDueIso(draft.duePreset),
+          now: draft.taskNow,
+          priorityName: draft.taskPriority,
+          databaseId: taskDatabaseId || undefined,
+          assignments: includeAssignments ? draft.assignments : undefined,
+          assignmentPropertyTargets: settings.ai.assignmentPropertyMap.task,
+        }
+
+        if (window.turboAPI) {
+          return window.turboAPI.createTask(taskPayload)
+        }
+        return createTaskWeb(settings, taskPayload)
+      }
+
+      const statusFromMode = noteStatusForMode(draft.mode)
+      const statusName = 'noteStatus' in draft ? draft.noteStatus : statusFromMode
+      const mergedTags = includeAssignments ? normalizeTags([...draft.tags, ...assignmentTags(draft.assignments)]) : normalizeTags(draft.tags)
+      const notePayload: CreateNoteInput = {
         title: cleanTitle,
-        body: draft.body.trim() || undefined,
-        dueISO: getDueIso(draft.duePreset),
-        now: draft.taskNow,
-        priorityName: draft.taskPriority,
+        body: draft.body,
+        statusName,
+        tags: mergedTags,
+        captureType: 'Quick',
+        databaseId: noteDatabaseId || undefined,
+        assignments: includeAssignments ? draft.assignments : undefined,
+        assignmentPropertyTargets: settings.ai.assignmentPropertyMap.note,
       }
 
       if (window.turboAPI) {
-        return window.turboAPI.createTask(taskPayload)
+        return window.turboAPI.createNote(notePayload)
       }
-      return createTaskWeb(settings, taskPayload)
-    }
-
-    const statusFromMode = noteStatusForMode(draft.mode)
-    const statusName = 'noteStatus' in draft ? draft.noteStatus : statusFromMode
-    const notePayload: CreateNoteInput = {
-      title: cleanTitle,
-      body: draft.body,
-      statusName,
-      tags: normalizeTags(draft.tags),
-      captureType: 'Quick',
-    }
-
-    if (window.turboAPI) {
-      return window.turboAPI.createNote(notePayload)
-    }
-    return createNoteWeb(settings, notePayload)
-  }, [settings])
+      return createNoteWeb(settings, notePayload)
+    },
+    [hasAiAssignments, noteDatabaseId, settings, taskDatabaseId],
+  )
 
   const runAutoOrganize = useCallback(async () => {
     setError('')
     try {
       const draft = getDraftFromState()
+      if (!hasDraftContent(draft)) {
+        throw new Error('Enter a title or body before organizing.')
+      }
       const organized = await organizeDraft(draft)
       applyOrganizedDraft(organized)
       setToast('AI organized capture')
@@ -304,12 +390,16 @@ export default function App() {
     }
   }, [applyOrganizedDraft, getDraftFromState, organizeDraft])
 
-  const saveCapture = useCallback(async (options?: { forceOrganize?: boolean }) => {
+  const saveCapture = useCallback(async () => {
     setIsSaving(true)
     setError('')
     try {
       let draft: OrganizeCaptureInput | OrganizeCaptureResult = getDraftFromState()
-      if (options?.forceOrganize || settings.ai.autoOrganize) {
+      if (!hasDraftContent(draft)) {
+        throw new Error('Enter a title or body before saving.')
+      }
+
+      if (settings.ai.autoOrganize) {
         draft = await organizeDraft(draft)
         applyOrganizedDraft(draft)
       }
@@ -339,11 +429,23 @@ export default function App() {
     return () => window.removeEventListener('keydown', listener)
   }, [isOrganizing, isSaving, saveCapture])
 
+  useEffect(() => {
+    const focusTitleInput = () => {
+      // Delay one frame so focus works reliably when the Electron window is shown.
+      window.requestAnimationFrame(() => {
+        titleInputRef.current?.focus()
+      })
+    }
+
+    focusTitleInput()
+    window.addEventListener('focus', focusTitleInput)
+    return () => window.removeEventListener('focus', focusTitleInput)
+  }, [])
+
   return (
     <main className="shell">
       <div className="window-drag" />
       <header className="top-row">
-        <CaptureModeTabs mode={mode} onChange={setMode} />
         <Settings
           open={settingsOpen}
           isElectron={isElectron}
@@ -365,6 +467,7 @@ export default function App() {
         <label className="field">
           <span>Title</span>
           <input
+            ref={titleInputRef}
             type="text"
             value={title}
             placeholder={isTaskMode ? 'What needs doing?' : 'Capture a quick note title'}
@@ -373,7 +476,7 @@ export default function App() {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 if (!isSaving && !isOrganizing) {
-                  void saveCapture({ forceOrganize: true })
+                  void saveCapture()
                 }
               }
             }}
@@ -388,7 +491,7 @@ export default function App() {
             placeholder="Details, links, context..."
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && event.ctrlKey) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 if (!isSaving && !isOrganizing) {
                   void saveCapture()
@@ -399,44 +502,70 @@ export default function App() {
         </label>
 
         {isTaskMode && (
-          <QuickToggles
-            now={taskNow}
-            duePreset={duePreset}
-            priority={priority}
-            onNowChange={setTaskNow}
-            onDuePresetChange={setDuePreset}
-            onPriorityChange={setPriority}
-          />
+          <>
+            <QuickToggles
+              now={taskNow}
+              duePreset={duePreset}
+              priority={priority}
+              onNowChange={setTaskNow}
+              onDuePresetChange={setDuePreset}
+              onPriorityChange={setPriority}
+            />
+            <label className="field">
+              <span>Task Database</span>
+              <select value={taskDatabaseId} onChange={(event) => setTaskDatabaseId(event.target.value)}>
+                <option value="">Primary Tasks DB</option>
+                {taskDatabases.map((database, index) => (
+                  <option key={`task-db-${database.id}-${index}`} value={database.id}>
+                    {(database.name || database.id).trim()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         )}
 
         {isNoteMode && (
-          <label className="field">
-            <span>Tags</span>
-            <div className="tag-editor">
-              {tags.map((tag) => (
-                <button key={tag} type="button" className="tag-chip" onClick={() => setTags((current) => current.filter((item) => item !== tag))}>
-                  {tag} ×
-                </button>
-              ))}
-              <input
-                type="text"
-                value={tagInput}
-                placeholder="Type tag and press Enter"
-                onChange={(event) => setTagInput(event.target.value)}
-                onBlur={() => {
-                  if (tagInput.trim()) {
-                    addTagTokens(tagInput)
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ',') {
-                    event.preventDefault()
-                    addTagTokens(tagInput)
-                  }
-                }}
-              />
-            </div>
-          </label>
+          <>
+            <label className="field">
+              <span>Note Database</span>
+              <select value={noteDatabaseId} onChange={(event) => setNoteDatabaseId(event.target.value)}>
+                <option value="">Primary Notes DB</option>
+                {noteDatabases.map((database, index) => (
+                  <option key={`note-db-${database.id}-${index}`} value={database.id}>
+                    {(database.name || database.id).trim()}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Tags</span>
+              <div className="tag-editor">
+                {tags.map((tag) => (
+                  <button key={tag} type="button" className="tag-chip" onClick={() => setTags((current) => current.filter((item) => item !== tag))}>
+                    {tag} ×
+                  </button>
+                ))}
+                <input
+                  type="text"
+                  value={tagInput}
+                  placeholder="Type tag and press Enter"
+                  onChange={(event) => setTagInput(event.target.value)}
+                  onBlur={() => {
+                    if (tagInput.trim()) {
+                      addTagTokens(tagInput)
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ',') {
+                      event.preventDefault()
+                      addTagTokens(tagInput)
+                    }
+                  }}
+                />
+              </div>
+            </label>
+          </>
         )}
       </section>
 
@@ -449,10 +578,24 @@ export default function App() {
             {isSaving ? 'Saving...' : 'Save'}
           </button>
         </div>
-        <span className="hint">Enter in title or Ctrl+Enter to save</span>
+        <span className="hint">AI assigns mode, project, goal, area, and effort when you save.</span>
       </footer>
 
       {aiSummary && <div className="ai-summary">{aiSummary}</div>}
+      {hasAiAssignments && (
+        <div className="assignment-chips">
+          <span className="assignment-chip">Project: {assignments.project}</span>
+          <span className="assignment-chip">Goal: {assignments.goal}</span>
+          <span className="assignment-chip">Area: {assignments.area}</span>
+          <span className="assignment-chip">Sub-Area: {assignments.subArea}</span>
+          <span className="assignment-chip">Intent: {assignments.intent}</span>
+          <span className="assignment-chip">Effort: {assignments.effort}</span>
+          <span className="assignment-chip">Energy: {assignments.energy}</span>
+          <span className="assignment-chip">Horizon: {assignments.horizon}</span>
+          <span className="assignment-chip">Project Status: {assignments.projectStatus}</span>
+          <span className="assignment-chip">Next Action: {assignments.nextAction}</span>
+        </div>
+      )}
       {error && <div className="toast error">{error}</div>}
       {toast && <div className="toast success">{toast}</div>}
       {lastCreatedUrl && (
