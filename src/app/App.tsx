@@ -383,7 +383,11 @@ export default function App() {
         throw new Error('Enter a title or body before organizing.')
       }
       const organized = await organizeDraft(draft)
-      applyOrganizedDraft(organized)
+      const withLockedDue = {
+        ...organized,
+        duePreset: draft.duePreset,
+      }
+      applyOrganizedDraft(withLockedDue)
       setToast('AI organized capture')
     } catch (organizeError) {
       setError(organizeError instanceof Error ? organizeError.message : 'AI organize failed.')
@@ -395,12 +399,17 @@ export default function App() {
     setError('')
     try {
       let draft: OrganizeCaptureInput | OrganizeCaptureResult = getDraftFromState()
+      const lockedDuePreset = draft.duePreset
       if (!hasDraftContent(draft)) {
         throw new Error('Enter a title or body before saving.')
       }
 
       if (settings.ai.autoOrganize) {
         draft = await organizeDraft(draft)
+        draft = {
+          ...draft,
+          duePreset: lockedDuePreset,
+        }
         applyOrganizedDraft(draft)
       }
 

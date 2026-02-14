@@ -2,6 +2,7 @@ import { Client } from '@notionhq/client'
 import {
   DEFAULT_NOTES_DB_ID,
   DEFAULT_TASKS_DB_ID,
+  normalizeNotionDatabaseId,
   type AssignmentPropertyTargets,
   type CaptureAssignments,
   type CreateNoteInput,
@@ -177,17 +178,20 @@ export function initNotion(
 ): void {
   notionClient = new Client({ auth: token })
 
-  if (ids?.tasksDbId?.trim()) {
-    tasksDbId = ids.tasksDbId
+  const normalizedTasksDbId = normalizeNotionDatabaseId(ids?.tasksDbId)
+  const normalizedNotesDbId = normalizeNotionDatabaseId(ids?.notesDbId)
+
+  if (normalizedTasksDbId) {
+    tasksDbId = normalizedTasksDbId
   }
-  if (ids?.notesDbId?.trim()) {
-    notesDbId = ids.notesDbId
+  if (normalizedNotesDbId) {
+    notesDbId = normalizedNotesDbId
   }
 }
 
 export async function createTask(input: CreateTaskInput): Promise<NotionCreateResult> {
   const notion = getNotionClient()
-  const targetDbId = typeof input.databaseId === 'string' && input.databaseId.trim().length > 0 ? input.databaseId.trim() : tasksDbId
+  const targetDbId = normalizeNotionDatabaseId(input.databaseId) || tasksDbId
   const children = bodyToParagraphBlocks(input.body)
   const properties: Record<string, unknown> = {
     Task: {
@@ -227,7 +231,7 @@ export async function createTask(input: CreateTaskInput): Promise<NotionCreateRe
 
 export async function createNote(input: CreateNoteInput): Promise<NotionCreateResult> {
   const notion = getNotionClient()
-  const targetDbId = typeof input.databaseId === 'string' && input.databaseId.trim().length > 0 ? input.databaseId.trim() : notesDbId
+  const targetDbId = normalizeNotionDatabaseId(input.databaseId) || notesDbId
   const children = bodyToParagraphBlocks(input.body)
   const properties: Record<string, unknown> = {
     Note: {

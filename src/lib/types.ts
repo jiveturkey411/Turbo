@@ -32,6 +32,24 @@ export interface ExtraDatabase {
   kind: DatabaseKind
 }
 
+export const DEFAULT_EXTRA_DATABASES: ExtraDatabase[] = [
+  {
+    name: 'Extra Tasks DB',
+    id: '2fa414cc-8377-8150-8085-e57ed3f0e8dd',
+    kind: 'task',
+  },
+  {
+    name: 'Extra Notes DB 1',
+    id: '306414cc-8377-800a-b19e-e7322caf023a',
+    kind: 'note',
+  },
+  {
+    name: 'Extra Notes DB 2',
+    id: '306414cc-8377-801f-aef8-d3404a29b7ab',
+    kind: 'note',
+  },
+]
+
 export interface AssignmentPropertyTargets {
   project: string
   goal: string
@@ -131,7 +149,7 @@ export const DEFAULT_SETTINGS: TurboSettings = {
   geminiApiKey: '',
   tasksDbId: DEFAULT_TASKS_DB_ID,
   notesDbId: DEFAULT_NOTES_DB_ID,
-  extraDatabases: [],
+  extraDatabases: DEFAULT_EXTRA_DATABASES,
   defaults: {
     taskPriority: 'P2 🟠',
     taskNow: false,
@@ -142,6 +160,32 @@ export const DEFAULT_SETTINGS: TurboSettings = {
     model: 'gemini-3-flash-preview',
     assignmentPropertyMap: DEFAULT_ASSIGNMENT_PROPERTY_MAP,
   },
+}
+
+export function normalizeNotionDatabaseId(value: unknown): string {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  const compact = trimmed.replace(/-/g, '')
+  if (!/^[0-9a-fA-F]{32}$/.test(compact)) {
+    return trimmed
+  }
+
+  return [
+    compact.slice(0, 8),
+    compact.slice(8, 12),
+    compact.slice(12, 16),
+    compact.slice(16, 20),
+    compact.slice(20),
+  ]
+    .join('-')
+    .toLowerCase()
 }
 
 function normalizePropertyName(value: unknown, fallback: string): string {
@@ -175,6 +219,7 @@ function normalizeExtraDatabases(value: unknown): ExtraDatabase[] {
     return []
   }
 
+  const seen = new Set<string>()
   const normalized: ExtraDatabase[] = []
   for (const item of value) {
     if (!item || typeof item !== 'object') {
@@ -183,12 +228,18 @@ function normalizeExtraDatabases(value: unknown): ExtraDatabase[] {
 
     const source = item as Partial<ExtraDatabase>
     const name = typeof source.name === 'string' ? source.name.trim() : ''
-    const id = typeof source.id === 'string' ? source.id.trim() : ''
+    const id = normalizeNotionDatabaseId(source.id)
     const kind: DatabaseKind = source.kind === 'task' ? 'task' : 'note'
 
     if (!name && !id) {
       continue
     }
+
+    const dedupeKey = `${kind}:${id.toLowerCase()}`
+    if (seen.has(dedupeKey)) {
+      continue
+    }
+    seen.add(dedupeKey)
 
     normalized.push({
       name: name || 'Unnamed DB',
@@ -204,18 +255,17 @@ export function normalizeSettings(candidate: Partial<TurboSettings> | null | und
   const defaults = candidate?.defaults
   const ai = candidate?.ai
   const assignmentPropertyMap = ai?.assignmentPropertyMap
+  const normalizedTasksDbId = normalizeNotionDatabaseId(candidate?.tasksDbId)
+  const normalizedNotesDbId = normalizeNotionDatabaseId(candidate?.notesDbId)
+  const normalizedExtraDatabases = normalizeExtraDatabases(candidate?.extraDatabases)
+  const seededExtraDatabases =
+    normalizedExtraDatabases.length > 0 ? normalizedExtraDatabases : normalizeExtraDatabases(DEFAULT_SETTINGS.extraDatabases)
   return {
     notionToken: typeof candidate?.notionToken === 'string' ? candidate.notionToken : '',
     geminiApiKey: typeof candidate?.geminiApiKey === 'string' ? candidate.geminiApiKey : '',
-    tasksDbId:
-      typeof candidate?.tasksDbId === 'string' && candidate.tasksDbId.trim().length > 0
-        ? candidate.tasksDbId
-        : DEFAULT_SETTINGS.tasksDbId,
-    notesDbId:
-      typeof candidate?.notesDbId === 'string' && candidate.notesDbId.trim().length > 0
-        ? candidate.notesDbId
-        : DEFAULT_SETTINGS.notesDbId,
-    extraDatabases: normalizeExtraDatabases(candidate?.extraDatabases),
+    tasksDbId: normalizedTasksDbId || DEFAULT_SETTINGS.tasksDbId,
+    notesDbId: normalizedNotesDbId || DEFAULT_SETTINGS.notesDbId,
+    extraDatabases: seededExtraDatabases,
     defaults: {
       taskPriority:
         typeof defaults?.taskPriority === 'string' && defaults.taskPriority.trim().length > 0

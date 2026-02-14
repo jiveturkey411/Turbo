@@ -1,4 +1,4 @@
-import { type CreateNoteInput, type CreateTaskInput, type NotionCreateResult, type TurboSettings } from './types'
+import { normalizeNotionDatabaseId, type CreateNoteInput, type CreateTaskInput, type NotionCreateResult, type TurboSettings } from './types'
 
 interface ApiSuccess {
   ok: true
@@ -45,7 +45,7 @@ async function postApi<TPayload>(endpoint: string, payload: TPayload): Promise<N
 }
 
 export async function createTaskWeb(settings: TurboSettings, input: CreateTaskInput): Promise<NotionCreateResult> {
-  const tasksDbId = typeof input.databaseId === 'string' && input.databaseId.trim().length > 0 ? input.databaseId.trim() : settings.tasksDbId
+  const tasksDbId = normalizeNotionDatabaseId(input.databaseId) || settings.tasksDbId
   return postApi('/api/notion/create-task', {
     input: {
       ...input,
@@ -58,7 +58,7 @@ export async function createTaskWeb(settings: TurboSettings, input: CreateTaskIn
 }
 
 export async function createNoteWeb(settings: TurboSettings, input: CreateNoteInput): Promise<NotionCreateResult> {
-  const notesDbId = typeof input.databaseId === 'string' && input.databaseId.trim().length > 0 ? input.databaseId.trim() : settings.notesDbId
+  const notesDbId = normalizeNotionDatabaseId(input.databaseId) || settings.notesDbId
   return postApi('/api/notion/create-note', {
     input: {
       ...input,

@@ -77,3 +77,5 @@ The web server sets CSP `frame-ancestors` for Notion domains so iframe embedding
 - Assignment fields can also map into dedicated Notion properties (Task DB and Note DB) via Settings > `AI Assignment Property Mapping`.
 - Assignment property mapping supports Notion `select`, `multi_select`, and `rich_text` properties.
 - You can add multiple extra Task/Note databases in Settings > `Additional Databases`, then choose the target DB from the capture form before saving.
+- Database IDs with or without hyphens are accepted; IDs are normalized automatically.
+- AI organize keeps your current due selection unchanged, so default due stays empty unless you set one.

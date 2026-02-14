@@ -88,6 +88,32 @@ function ensureNonEmptyString(value, fieldName) {
   return value.trim()
 }
 
+function normalizeNotionDatabaseId(value) {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  const compact = trimmed.replace(/-/g, '')
+  if (!/^[0-9a-fA-F]{32}$/.test(compact)) {
+    return trimmed
+  }
+
+  return [
+    compact.slice(0, 8),
+    compact.slice(8, 12),
+    compact.slice(12, 16),
+    compact.slice(16, 20),
+    compact.slice(20),
+  ]
+    .join('-')
+    .toLowerCase()
+}
+
 function bodyToParagraphBlocks(body) {
   if (!body || typeof body !== 'string' || body.trim().length === 0) {
     return []
@@ -118,17 +144,19 @@ function getNotionClient() {
 }
 
 function resolveTasksDbId(overrideValue) {
-  if (typeof overrideValue === 'string' && overrideValue.trim().length > 0) {
-    return overrideValue.trim()
+  const override = normalizeNotionDatabaseId(overrideValue)
+  if (override) {
+    return override
   }
-  return process.env.TASKS_DB_ID?.trim() || DEFAULT_TASKS_DB_ID
+  return normalizeNotionDatabaseId(process.env.TASKS_DB_ID) || DEFAULT_TASKS_DB_ID
 }
 
 function resolveNotesDbId(overrideValue) {
-  if (typeof overrideValue === 'string' && overrideValue.trim().length > 0) {
-    return overrideValue.trim()
+  const override = normalizeNotionDatabaseId(overrideValue)
+  if (override) {
+    return override
   }
-  return process.env.NOTES_DB_ID?.trim() || DEFAULT_NOTES_DB_ID
+  return normalizeNotionDatabaseId(process.env.NOTES_DB_ID) || DEFAULT_NOTES_DB_ID
 }
 
 function normalizeTags(tags) {
@@ -485,7 +513,7 @@ app.post('/api/notion/create-task', async (req, res) => {
     const input = req.body?.input ?? {}
     const notion = getNotionClient()
     const title = ensureNonEmptyString(input.title, 'title')
-    const tasksDbId = resolveTasksDbId(req.body?.tasksDbId)
+    const tasksDbId = resolveTasksDbId(input.databaseId ?? req.body?.tasksDbId)
     const body = typeof input.body === 'string' ? input.body : ''
     const dueISO = typeof input.dueISO === 'string' && input.dueISO.trim().length > 0 ? input.dueISO.trim() : undefined
     const now = typeof input.now === 'boolean' ? input.now : false
@@ -541,7 +569,7 @@ app.post('/api/notion/create-note', async (req, res) => {
     const notion = getNotionClient()
     const title = ensureNonEmptyString(input.title, 'title')
     const body = typeof input.body === 'string' ? input.body : ''
-    const notesDbId = resolveNotesDbId(req.body?.notesDbId)
+    const notesDbId = resolveNotesDbId(input.databaseId ?? req.body?.notesDbId)
     const statusName = input.statusName === 'Inbox' ? 'Inbox' : 'Brain Dump'
     const captureType = input.captureType === 'Quick' ? 'Quick' : 'Quick'
     const tags = normalizeTags(input.tags)
